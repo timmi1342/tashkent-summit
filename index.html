@@ -493,8 +493,17 @@ function setLang(l){LANG=l;try{localStorage.setItem('tsc_lang',l);}catch(e){}app
 const PRICES={explorer:220,standard:290,athlete:390};
 const LABELS={explorer:'Explorer',standard:'Standard',athlete:'Athlete'};
 const DEPOSIT=0.30,TOTAL_STEPS=6,EBIKE=30,RES_DISC=0.35;
-let S={tier:null,date:null,guests:1,details:{},ebike:false,signed:false,step:0};
+let S={tier:null,date:null,guests:1,details:{},ebike:false,signed:false,step:0,paying:false,payError:null};
 let RATE='visitor';
+let DEPARTURES=null; // null = ещё грузится; [] = загружено, пусто
+async function loadDepartures(){
+  if(DEPARTURES)return DEPARTURES;
+  try{const r=await fetch('/api/departures');const j=await r.json();DEPARTURES=(j.ok&&j.departures)?j.departures:[];}
+  catch(e){DEPARTURES=[];}
+  if(document.getElementById('overlay').classList.contains('on'))render();
+  return DEPARTURES;
+}
+const trackFor=k=>k==='athlete'?'athlete':'mixed';
 try{const r=localStorage.getItem('tsc_rate');if(r==='resident'||r==='visitor')RATE=r;}catch(e){}
 const money=v=>'$'+v.toLocaleString('en-US');
 const rprice=k=>Math.round(PRICES[k]*(1-RES_DISC)/5)*5;
@@ -509,17 +518,8 @@ function renderTierPrices(){
 function setRate(r){RATE=r;try{localStorage.setItem('tsc_rate',r);}catch(e){}renderTierPrices();
   if(document.getElementById('overlay').classList.contains('on'))render();}
 const fmt=(iso,o)=>new Date(iso).toLocaleDateString(LOCALE[LANG],o);
-function nextSaturdays(n,athleteOnly){
-  const out=[],d=new Date();let added=0,i=0;
-  while(added<n&&i<160){const dt=new Date(d);dt.setDate(d.getDate()+i);
-    if(dt.getDay()===6){const athlete=i%28>=21;
-      const dep={iso:dt.toISOString().slice(0,10),label:dt.toLocaleDateString(LOCALE[LANG],{weekday:'short',month:'short',day:'numeric'}),athlete};
-      if(athleteOnly?dep.athlete:!dep.athlete){out.push(dep);added++;}}
-    i++;}
-  return out;
-}
-function openBooking(tier){S={tier:tier||null,date:null,guests:1,details:{},ebike:false,signed:false,step:tier?1:0};
-  document.getElementById('overlay').classList.add('on');document.body.style.overflow='hidden';render();}
+function openBooking(tier){S={tier:tier||null,date:null,guests:1,details:{},ebike:false,signed:false,step:tier?1:0,paying:false,payError:null};
+  document.getElementById('overlay').classList.add('on');document.body.style.overflow='hidden';loadDepartures();render();}
 function closeBooking(){document.getElementById('overlay').classList.remove('on');document.body.style.overflow='';}
 function go(s){S.step=s;render();}
 function render(){
@@ -533,9 +533,14 @@ function stepTier(){return `<h3>${t('b_pickTier')}</h3><p class="hint">${t('b_pi
   ${Object.keys(PRICES).map(k=>`<div class="opt ${S.tier===k?'sel':''}" onclick="S.tier='${k}';render()">
     <div><div class="lab">${LABELS[k]}</div><div class="meta">${t('m_'+k)}</div></div><div class="amt">${money(price(k))}</div></div>`).join('')}
   <div class="nav-row"><span></span><button class="btn" ${S.tier?'':'disabled'} onclick="go(1)">${t('b_continue')}</button></div>`;}
-function stepDate(){const deps=nextSaturdays(6,S.tier==='athlete');
+function stepDate(){
+  if(DEPARTURES===null)return `<h3>${t('b_chooseDep')}</h3><p class="hint">${t('b_loading')||'Loading dates…'}</p>
+    <div class="nav-row"><button class="btn ghost" onclick="go(0)">${t('b_back')}</button><span></span></div>`;
+  const track=trackFor(S.tier);
+  const deps=DEPARTURES.filter(d=>d.track===track&&d.available>=S.guests).slice(0,8);
   return `<h3>${t('b_chooseDep')}</h3><p class="hint">${LABELS[S.tier]}${t('b_depSuffix')}</p>
-  ${deps.map(d=>`<div class="opt ${S.date===d.iso?'sel':''}" onclick="S.date='${d.iso}';render()"><div class="lab">${d.label}</div><div class="meta">${t('days_nights')}</div></div>`).join('')}
+  ${deps.length?deps.map(d=>`<div class="opt ${S.date===d.date?'sel':''}" onclick="S.date='${d.date}';render()"><div class="lab">${fmt(d.date,{weekday:'short',month:'short',day:'numeric'})}</div><div class="meta">${t('days_nights')}</div></div>`).join(''):
+  `<p class="hint">${t('b_noDates')||'No upcoming dates with availability right now — please check back soon.'}</p>`}
   <div class="nav-row"><button class="btn ghost" onclick="go(0)">${t('b_back')}</button><button class="btn" ${S.date?'':'disabled'} onclick="go(2)">${t('b_continue')}</button></div>`;}
 function stepGuests(){return `<h3>${t('b_howMany')}</h3><p class="hint">${t('b_upTo12')}</p>
   <div class="counter" style="margin:1rem 0 1.4rem"><button onclick="S.guests=Math.max(1,S.guests-1);render()">−</button><b>${S.guests}</b><button onclick="S.guests=Math.min(12,S.guests+1);render()">+</button></div>
@@ -570,16 +575,29 @@ function summaryBox(){const ride=ebikeCost(),base=price(S.tier)*S.guests,sub=bas
     <div class="r"><span>${t('sum_balance')}</span><span>${money(sub-dep)}</span></div>
     <div class="r big"><span>${t('sum_depToday')}</span><span>${money(dep)}</span></div></div>`;}
 function stepPay(){return `<h3>${t('b_secure')}</h3><p class="hint">${LABELS[S.tier]} · ${fmt(S.date,{month:'long',day:'numeric'})} · ${S.guests}</p>
-  ${summaryBox()}<div class="pay"><button onclick="payNow()">${t('pay_payme')}</button><button onclick="payNow()">${t('pay_click')}</button><button onclick="payNow()">${t('pay_stripe')}</button></div>
-  <p class="demo">${t('demo')}</p><div class="nav-row"><button class="btn ghost" onclick="go(4)">${t('b_back')}</button><span></span></div>`;}
-function payNow(){S.ref='TSC-'+Math.random().toString(36).slice(2,8).toUpperCase();sendBooking();go(6);}
-function sendBooking(){try{const sub=subtotal(),dep=Math.round(sub*DEPOSIT);
-  fetch('/api/booking',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ref:S.ref,tier:LABELS[S.tier],date:S.date,guests:S.guests,rate:RATE,
-      ebike:S.ebike,
-      name:S.details.name,email:S.details.email,phone:S.details.phone,diet:t(S.details.diet||'diet_none'),
-      note:S.details.note,deposit:money(dep),balance:money(sub-dep)})
-  }).catch(()=>{});}catch(e){}}
+  ${summaryBox()}<div class="pay">${['pay_payme','pay_click','pay_stripe'].map(k=>`<button ${S.paying?'disabled':''} onclick="payNow()">${S.paying?(t('b_processing')||'Processing…'):t(k)}</button>`).join('')}</div>
+  ${S.payError?`<div class="err" style="display:block">${S.payError}</div>`:''}
+  <p class="demo">${t('demo')}</p><div class="nav-row"><button class="btn ghost" ${S.paying?'disabled':''} onclick="go(4)">${t('b_back')}</button><span></span></div>`;}
+async function payNow(){
+  if(S.paying)return;
+  S.ref='TSC-'+Math.random().toString(36).slice(2,8).toUpperCase();
+  S.paying=true;S.payError=null;render();
+  const sub=subtotal(),dep=Math.round(sub*DEPOSIT);
+  try{
+    const r=await fetch('/api/booking',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ref:S.ref,tier:LABELS[S.tier],date:S.date,guests:S.guests,rate:RATE,ebike:S.ebike,
+        name:S.details.name,email:S.details.email,phone:S.details.phone,diet:t(S.details.diet||'diet_none'),
+        note:S.details.note,deposit:money(dep),balance:money(sub-dep)})});
+    const j=await r.json().catch(()=>({ok:false}));
+    S.paying=false;
+    if(j.ok){DEPARTURES=null;go(6);}
+    else{
+      S.payError=j.error==='not_enough_capacity'?(t('b_soldOut')||'Sorry — that date just sold out. Please go back and pick another date.'):
+        (t('b_payError')||'Something went wrong and your booking was not saved. Please try again.');
+      render();
+    }
+  }catch(e){S.paying=false;S.payError=t('b_payError')||'Something went wrong and your booking was not saved. Please try again.';render();}
+}
 function stepConfirm(){const sub=subtotal(),dep=Math.round(sub*DEPOSIT);
   return `<div class="confirm"><div class="check">✓</div><h3>${t('c_in')}, ${(S.details.name||'').split(' ')[0]||''}!</h3>
   <p class="hint">${t('c_sent')}${S.details.email}.</p><div class="ref">${S.ref}</div>
@@ -600,9 +618,6 @@ window.addEventListener('DOMContentLoaded',()=>{
   renderTierPrices();
   if(p.has('book')){const b=p.get('book');openBooking(PRICES[b]?b:undefined);}
 });
-</script>
-</body>
-</html>
 </script>
 </body>
 </html>
