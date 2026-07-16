@@ -576,6 +576,7 @@ function payNow(){S.ref='TSC-'+Math.random().toString(36).slice(2,8).toUpperCase
 function sendBooking(){try{const sub=subtotal(),dep=Math.round(sub*DEPOSIT);
   fetch('/api/booking',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ref:S.ref,tier:LABELS[S.tier],date:S.date,guests:S.guests,rate:RATE,
+      ebike:S.ebike,
       name:S.details.name,email:S.details.email,phone:S.details.phone,diet:t(S.details.diet||'diet_none'),
       note:S.details.note,deposit:money(dep),balance:money(sub-dep)})
   }).catch(()=>{});}catch(e){}}
@@ -599,6 +600,9 @@ window.addEventListener('DOMContentLoaded',()=>{
   renderTierPrices();
   if(p.has('book')){const b=p.get('book');openBooking(PRICES[b]?b:undefined);}
 });
+</script>
+</body>
+</html>
 </script>
 </body>
 </html>
